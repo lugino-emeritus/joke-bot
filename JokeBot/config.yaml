@@ -1,0 +1,25 @@
+bot_startcmd: '!joke'
+
+bot_display_name: JokeBot
+
+matrix_server:
+  base_url: 'http://localhost:8008'
+  valid_cert_check: False
+  # token is preferred over matrix_user; if not defined the matrix_user settings would be used.
+  token: ''
+  user_id: '@user_with_token:matrix.org'
+
+matrix_user:
+  username: '@JokeBot:matrix.org'
+  password: 'secret_pw'
+
+auto_join_invited_rooms: False
+
+# list of matrix user ids which can control the bot
+admin_ids:
+  - '@user1:server.net'
+
+# default joke settings, currently only german (de) is available
+default_joke:
+  language: 'de'
+  type: '0'
