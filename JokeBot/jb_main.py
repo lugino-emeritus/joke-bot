@@ -1,14 +1,17 @@
 import requests
+import matrix_client
 from matrix_client.client import MatrixClient
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime
-import logging
 import yaml
 import threading
+import logging
 
-logging.basicConfig(level = logging.DEBUG, format='%(levelname)-8s %(message)s')
-logging.getLogger(requests.__name__).setLevel(logging.ERROR)
+logging.basicConfig(level=logging.DEBUG, format='%(levelname)-8s %(asctime)s: %(message)s')
+logging.getLogger(matrix_client.client.__name__).setLevel(logging.DEBUG)
+logging.getLogger("requests").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 CONFIG_FILENAME = 'config.yaml'
 
@@ -24,32 +27,23 @@ else:
 	DEFAULT_LANGUAGE = 'de'
 	DEFAULT_TYPE = '0'
 
-def get_joke(language = DEFAULT_LANGUAGE, type_ = DEFAULT_TYPE):
+def get_joke(language=DEFAULT_LANGUAGE, type_=DEFAULT_TYPE):
 	# pull requsts for this method are really welcome
-	if language == 'de':
-		if type_ == '0':
-			data = requests.get('http://www.witze.net/?embed').text
-			soup = BeautifulSoup(data, 'html.parser')
-			x = [el for el in soup.findAll(text=True) if el.parent.name not in ['style', 'head', 'title']]
-			return '\n'.join(x[:-3])
-		elif type_ == 'foo':
-			return 'bar'
-	elif language == 'en':
-		if type_ == '0':
-			pass
-	return "Settings (language = {}, type_ = {}) are not available yet.".format(language, type_)
-
-#import sys
-#import linecache
-#
-#def get_exception_str():
-#	(exc_type, exc_obj, tb) = sys.exc_info()
-#	lineno = tb.tb_lineno
-#	f = tb.tb_frame
-#	filename = f.f_code.co_filename
-#	linecache.checkcache(filename)
-#	line = linecache.getline(filename, lineno, f.f_globals)
-#	return 'Exception in ({}, LINE {} "{}"): {}'.format(filename, lineno, line.strip(), exc_obj)
+	try:
+		if language == 'de':
+			if type_ == '0':
+				data = requests.get('http://www.witze.net/?embed&image=none&menu=off', timeout=30).text
+				soup = BeautifulSoup(data, 'html.parser')
+				x = [el for el in soup.findAll(text=True) if el.parent.name not in ['style', 'head', 'title']]
+				return '\n'.join(x)
+			elif type_ == 'foo':
+				return 'bar'
+		elif language == 'en':
+			if type_ == '0':
+				pass
+		return "Settings (language = {}, type_ = {}) are not available yet.".format(language, type_)
+	except Exception as e:
+		return "Something went wrong while receiving joke: {}".format(repr(e))
 
 class JokeBot:
 	bot_startcmd = '!joke'
@@ -59,7 +53,7 @@ class JokeBot:
 	init_done = False
 	admin_ids = set()
 
-	def __init__(self, filename = CONFIG_FILENAME):
+	def __init__(self, filename=CONFIG_FILENAME):
 		logging.debug('load config')
 		config_dic = load_yaml_config(filename)
 		matrix_server = config_dic['matrix_server']
@@ -128,7 +122,7 @@ class JokeBot:
 		logging.debug('not ignoring room {} any more'.format(room_id))
 
 	def ignore_room_temporary(self, room_id):
-		threading.Thread(target = self.temp_ignore_room_thread, args = [room_id]).start()
+		threading.Thread(target=self.temp_ignore_room_thread, args=[room_id], daemon=True).start()
 
 	def leave_room(self, room_id):
 		logging.debug('trying to leave room with id {}'.format(room_id))
@@ -143,7 +137,7 @@ class JokeBot:
 			logging.debug('failed to leave known room with id {}'.format(leave_room.room_id))
 		return False
 
-	def process_invite(self, room_id, state = None):
+	def process_invite(self, room_id, state=None):
 		logging.debug('received invitation of {}'.format(room_id))
 		if self.auto_join_invited_rooms:
 			self.join_room(room_id)
@@ -154,6 +148,7 @@ class JokeBot:
 			if sender not in self.admin_ids:
 				logging.debug('{} has no permissions to send a ctl-message'.format(sender))
 				room.send_notice('{} has no permissions to send a ctl-message'.format(sender))
+				return
 			data = msg.split(' ')[1:]
 			if len(data) == 2:
 				if data[0] == 'join':
@@ -165,7 +160,7 @@ class JokeBot:
 					if not self.leave_room(data[1]):
 						room.send_notice('room could not be left')
 			return
-	
+
 		logging.info('sending joke to room {}'.format(room.room_id))
 		answer = '...'
 		data = msg.split(' ')[1:] # remove first empty string
@@ -175,7 +170,9 @@ class JokeBot:
 			answer = get_joke(data[0])
 		elif len(data) == 2:
 			answer = get_joke(data[0], data[1])
+		logging.debug('starting room send text')
 		room.send_text(answer)
+		logging.debug('done room send text')
 
 
 	def process_message(self, roomchunk):
@@ -190,23 +187,25 @@ class JokeBot:
 		if content['msgtype'] == 'm.text':
 			msg = content['body']
 			if msg.startswith(self.bot_startcmd):
-				room = self.mcl.get_rooms()[roomchunk['room_id']]	
+				room = self.mcl.get_rooms()[roomchunk['room_id']]
 				msg = msg[len(self.bot_startcmd):]
 				self.evaluate_bot_message(room, roomchunk['sender'], msg)
 
 
-jokebot_restarts = 3
+sleeping_time = 5
 timestamp_last_exception = time.time()
-while jokebot_restarts:
+while True:
 	try:
 		jokebot = JokeBot()
 		jokebot.run()
 	except:
 		logging.exception('Exception at time {}'.format(datetime.now()))
 
-	if time.time() - timestamp_last_exception > 3600: # 1 hour
-		jokebot_restarts = 3
+	if time.time() - timestamp_last_exception > 900: # 15 min
+		sleeping_time = 5
+	elif sleeping_time < 450:
+		sleeping_time = int(sleeping_time * 4/3 + 1)
 	else:
-		jokebot_restarts -= 1
+		sleeping_time = 600
 	timestamp_last_exception = time.time()
-	time.sleep(10)
+	time.sleep(sleeping_time)
