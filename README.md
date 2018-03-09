@@ -1,5 +1,6 @@
 # JokeBot
 Joke bot for matrix.org.
+Old. Use [MpyBot](https://github.com/lugino-emeritus/MpyBot) as replacement.
 
 ## Controlling bot / get a joke
 * Depending on the settings, just invite the bot (there is no public bot at the moment) to a room. Then it would join the room.
